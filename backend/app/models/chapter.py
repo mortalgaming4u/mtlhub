@@ -5,6 +5,7 @@ from app.db.session import Base
 
 class Chapter(Base):
     __tablename__ = "chapters"
+    __table_args__ = {"extend_existing": True}
 
     id = Column(Integer, primary_key=True, index=True)
     novel_id = Column(Integer, ForeignKey("novels.id"), nullable=False)
