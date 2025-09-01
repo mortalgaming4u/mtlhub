@@ -1,9 +1,5 @@
-# backend/app/services/novel_ingestor.py
-
 import requests
 from bs4 import BeautifulSoup
-import re
-import time
 import logging
 
 from urllib.parse import urlparse
@@ -24,7 +20,6 @@ def get_ingestor(db: Session, service_role_key: str, url: str):
         return IxdzsIngestor(db, service_role_key)
 
     # add more domains here with similar dynamic imports...
-
     return NovelIngestor(db, service_role_key)
 
 
@@ -56,7 +51,6 @@ class NovelIngestor:
         # Generic metadata via OpenGraph
         meta_title = soup.find("meta", property="og:title")
         title = meta_title["content"][:255] if meta_title else "Unknown"
-
         return {
             "title": title,
             "author": "Unknown",
