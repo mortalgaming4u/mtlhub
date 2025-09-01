@@ -1,17 +1,17 @@
 # backend/app/schemas/chapter.py
 
-from typing import Optional
 from pydantic import BaseModel
 
 class ChapterBase(BaseModel):
-    index: int
-    title: Optional[str] = None
-    content: str
+    chapter_number: int
+    title: str
+    original_content: str
+    source_url: str
 
 class ChapterCreate(ChapterBase):
     novel_id: int
 
-class ChapterRead(ChapterBase):
+class ChapterOut(ChapterBase):
     id: int
     novel_id: int
 
