@@ -1,35 +1,31 @@
-import os
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, HttpUrl
-
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from app.db.session import get_db
 from app.services.novel_ingestor import NovelIngestor
+from app.schemas.ingest import IngestRequest, IngestResponse
+import os
 
-# ✅ No internal prefix here — it's already set in main.py
-router = APIRouter(
-    tags=["ingest"],
-)
+router = APIRouter()
 
-# Request model
-class IngestRequest(BaseModel):
-    url: HttpUrl
-
-# Response model
-class IngestResponse(BaseModel):
-    success: bool
-    novel_id: int
-
-@router.post("/", response_model=IngestResponse)
-async def ingest_novel(req: IngestRequest):
+@router.post("/ingest", response_model=IngestResponse)
+def ingest_novel(request: IngestRequest, db: Session = Depends(get_db)):
     """
-    Trigger the novel ingestion pipeline for the given URL.
+    Ingests a novel from the provided URL and stores metadata + chapters.
     """
     service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
     if not service_key:
-        raise HTTPException(status_code=500, detail="Supabase service role key not configured")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Missing Supabase service role key"
+        )
+
+    ingestor = NovelIngestor(db=db, service_role_key=service_key)
 
     try:
-        ingestor = NovelIngestor(service_role_key=service_key)
-        result = ingestor.ingest(req.url)
-        return IngestResponse(success=True, novel_id=result.novel_id)
+        result = ingestor.ingest_novel(url=request.url)
+        return IngestResponse(**result)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
