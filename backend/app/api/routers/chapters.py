@@ -1,29 +1,24 @@
-# backend/app/api/routers/chapters.py
+# backend/app/api/routers/novels.py
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.db.deps import get_db
-from app.schemas.chapter import ChapterCreate, ChapterRead
-from app.services.chapter_service import list_chapters, create_chapter, get_chapter
-from app.services.novel_service import get_novel
+from app.schemas.novel import NovelCreate, NovelRead
+from app.services.novel_service import create_novel, get_novel, list_novels
 
-router = APIRouter(prefix="/chapters", tags=["chapters"])
+router = APIRouter(prefix="/novels", tags=["novels"])
 
-@router.post("/", response_model=ChapterRead)
-def create(chapter: ChapterCreate, db: Session = Depends(get_db)):
-    if not get_novel(db, chapter.novel_id):
-        raise HTTPException(status_code=404, detail="Parent novel not found")
-    return create_chapter(db, chapter)
+@router.post("/", response_model=NovelRead)
+def create_novel_endpoint(novel: NovelCreate, db: Session = Depends(get_db)):
+    return create_novel(db, novel)
 
-@router.get("/novel/{novel_id}", response_model=list[ChapterRead])
-def read_for_novel(novel_id: int, db: Session = Depends(get_db)):
-    if not get_novel(db, novel_id):
+@router.get("/", response_model=list[NovelRead])
+def list_novels_endpoint(db: Session = Depends(get_db)):
+    return list_novels(db)
+
+@router.get("/{novel_id}", response_model=NovelRead)
+def get_novel_endpoint(novel_id: int, db: Session = Depends(get_db)):
+    novel = get_novel(db, novel_id)
+    if not novel:
         raise HTTPException(status_code=404, detail="Novel not found")
-    return list_chapters(db, novel_id)
-
-@router.get("/{chapter_id}", response_model=ChapterRead)
-def read_chapter(chapter_id: int, db: Session = Depends(get_db)):
-    chapter = get_chapter(db, chapter_id)
-    if not chapter:
-        raise HTTPException(status_code=404, detail="Chapter not found")
-    return chapter
+    return novel
