@@ -1,35 +1,40 @@
-// src/pages/request.tsx
-
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
-interface RequestLog {
-  url: string;
-  created_at: string;
+interface IngestForm {
+  bookUrl: string;
+  chapterPattern: string;
+  imageUrl: string;
+  titleEn: string;
+  titleZh: string;
+  synopsis: string;
+  author: string;
+  genres: string;
+  tags: string;
 }
 
 const RequestPage = () => {
-  const [url, setUrl] = useState("");
+  const [form, setForm] = useState<IngestForm>({
+    bookUrl: "",
+    chapterPattern: "",
+    imageUrl: "",
+    titleEn: "",
+    titleZh: "",
+    synopsis: "",
+    author: "",
+    genres: "",
+    tags: "",
+  });
   const [loading, setLoading] = useState(false);
-  const [logs, setLogs] = useState<RequestLog[]>([]);
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
   const logsRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
-  const [consoleOpen, setConsoleOpen] = useState(false);
 
-  // Helper to validate only ixdzs.tw book URLs
-  const isValidIxdzsUrl = (url: string) =>
-    /^https?:\/\/(www\.)?ixdzs\.tw\/book\/\d+\/?$/.test(url);
-
-  // Append timestamped debug entry
+  // Append a timestamped message to debug console
   const log = (msg: string) => {
     const entry = `[${new Date().toLocaleTimeString()}] ${msg}`;
-    setDebugLogs((prev) => {
-      const updated = [...prev, entry];
-      return updated.slice(-100);
-    });
+    setDebugLogs((prev) => [...prev, entry].slice(-100));
     requestAnimationFrame(() => {
       if (logsRef.current) {
         logsRef.current.scrollTop = logsRef.current.scrollHeight;
@@ -37,141 +42,180 @@ const RequestPage = () => {
     });
   };
 
-  // Fetch latest 10 requests from Supabase for display
-  const fetchLogs = async () => {
-    log("Fetching recent requests...");
-    const { data, error } = await supabase
-      .from("requests")
-      .select("url, created_at")
-      .order("created_at", { ascending: false })
-      .limit(10);
+  // Validators
+  const isValidBookUrl = (url: string) =>
+    /^https?:\/\/(www\.)?ixdzs\.tw\/book\/\d+/.test(url);
 
-    if (error) {
-      log("Error fetching logs: " + error.message);
-    } else {
-      setLogs(data as RequestLog[]);
-      log(`Fetched ${data?.length ?? 0} recent requests.`);
-    }
+  const isValidChapterPattern = (pattern: string) =>
+    /^(p?\d+\.html)$/.test(pattern);
+
+  const isValidUrl = (url: string) =>
+    /^https?:\/\/[^\s/$.?#].[^\s]*\.(jpg|jpeg|png|gif)$/.test(url);
+
+  // Handle form field changes
+  const handleChange = (field: keyof IngestForm, value: string) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  // Submit to /api/ingest
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    log("Form submitted");
+    log("Submitting ingestion request...");
 
-    if (!isValidIxdzsUrl(url.trim())) {
-      log("Invalid URL format");
-      toast.error("Please enter a valid ixdzs.tw book URL.");
+    // Validate fields
+    if (!isValidBookUrl(form.bookUrl)) {
+      toast.error("Invalid book URL. Must be ixdzs.tw/book/{id}");
+      return;
+    }
+    if (form.chapterPattern && !isValidChapterPattern(form.chapterPattern)) {
+      toast.error("Invalid chapter pattern. Example: 1.html or p1.html");
+      return;
+    }
+    if (form.imageUrl && !isValidUrl(form.imageUrl)) {
+      toast.error("Invalid image URL. Must end with .jpg/.png/.gif");
+      return;
+    }
+    if (!form.titleEn.trim()) {
+      toast.error("English title is required");
+      return;
+    }
+    if (!form.titleZh.trim()) {
+      toast.error("Chinese title is required");
+      return;
+    }
+    if (!form.author.trim()) {
+      toast.error("Author name is required");
       return;
     }
 
     setLoading(true);
-    log("Sending to ingestion API...");
+    log("Calling backend API /api/ingest");
 
     try {
-      const resp = await fetch("/api/ingest", {
+      const res = await fetch("/api/ingest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: url.trim() }),
+        body: JSON.stringify(form),
       });
-      const body = await resp.json();
+      const data = await res.json();
       setLoading(false);
 
-      if (!resp.ok || !body.novel_id) {
-        const msg = body.error || "Unknown error";
-        log("Ingestion API error: " + msg);
-        toast.error("Failed to ingest: " + msg);
+      if (!res.ok) {
+        toast.error(`Ingestion failed: ${data.message}`);
+        log(`Error: ${data.message}`);
         return;
       }
 
-      log("Ingestion successful, novel_id=" + body.novel_id);
-      setUrl("");
-      fetchLogs();
-      navigate(`/read/${body.novel_id}`);
+      log("Ingestion succeeded, navigating to reader");
+      navigate(`/read/${data.novel_id}`);
     } catch (err: any) {
       setLoading(false);
-      log("Network error: " + err.message);
-      toast.error("Network error: " + err.message);
+      toast.error(`Network error: ${err.message}`);
+      log(`Network error: ${err.message}`);
     }
   };
 
-  useEffect(() => {
-    fetchLogs();
-  }, []);
-
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen p-6">
-      <h1 className="text-2xl font-bold mb-4">📚 Novel Request Form</h1>
+    <div className="p-6 max-w-3xl mx-auto">
+      <h1 className="text-3xl font-bold mb-6">📥 New Novel Ingestion</h1>
 
-      <form onSubmit={handleSubmit} className="w-full max-w-md space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4">
         <input
-          type="text"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="Paste ixdzs.tw URL here"
+          type="url"
+          placeholder="Book URL (ixdzs.tw/book/{id})"
+          value={form.bookUrl}
+          onChange={(e) => handleChange("bookUrl", e.target.value)}
           className="w-full px-4 py-2 border rounded"
           required
+        />
+
+        <input
+          type="text"
+          placeholder="Chapter Pattern (e.g. 1.html or p1.html)"
+          value={form.chapterPattern}
+          onChange={(e) => handleChange("chapterPattern", e.target.value)}
+          className="w-full px-4 py-2 border rounded"
+        />
+
+        <input
+          type="url"
+          placeholder="Cover Image URL (jpg, png, gif)"
+          value={form.imageUrl}
+          onChange={(e) => handleChange("imageUrl", e.target.value)}
+          className="w-full px-4 py-2 border rounded"
+        />
+
+        <input
+          type="text"
+          placeholder="Book Title (English)"
+          value={form.titleEn}
+          onChange={(e) => handleChange("titleEn", e.target.value)}
+          className="w-full px-4 py-2 border rounded"
+          required
+        />
+
+        <input
+          type="text"
+          placeholder="Book Title (Chinese)"
+          value={form.titleZh}
+          onChange={(e) => handleChange("titleZh", e.target.value)}
+          className="w-full px-4 py-2 border rounded"
+          required
+        />
+
+        <textarea
+          placeholder="Synopsis"
+          value={form.synopsis}
+          onChange={(e) => handleChange("synopsis", e.target.value)}
+          className="w-full px-4 py-2 border rounded"
+          rows={3}
+        />
+
+        <input
+          type="text"
+          placeholder="Author Name"
+          value={form.author}
+          onChange={(e) => handleChange("author", e.target.value)}
+          className="w-full px-4 py-2 border rounded"
+          required
+        />
+
+        <input
+          type="text"
+          placeholder="Genres (comma-separated)"
+          value={form.genres}
+          onChange={(e) => handleChange("genres", e.target.value)}
+          className="w-full px-4 py-2 border rounded"
+        />
+
+        <input
+          type="text"
+          placeholder="Tags (comma-separated)"
+          value={form.tags}
+          onChange={(e) => handleChange("tags", e.target.value)}
+          className="w-full px-4 py-2 border rounded"
         />
 
         <button
           type="submit"
           disabled={loading}
-          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+          className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700"
         >
-          {loading ? "Submitting..." : "Submit Request"}
+          {loading ? "Submitting..." : "Submit Novel"}
         </button>
-
-        {loading && (
-          <p className="text-sm text-muted-foreground">
-            Processing request...
-          </p>
-        )}
       </form>
 
-      {/* Recent Requests */}
-      <div className="mt-8 w-full max-w-md p-4 border rounded bg-gray-50">
-        <h2 className="text-lg font-semibold mb-2">📜 Recent Requests</h2>
-        <ul className="text-sm space-y-1">
-          {logs.map((logItem, i) => (
-            <li key={i}>
-              <span className="font-mono">{logItem.url}</span>{" "}
-              <span className="text-gray-500">
-                {new Date(logItem.created_at).toLocaleString()}
-              </span>
-            </li>
+      <div
+        className="mt-8 bg-black text-green-400 font-mono text-xs p-4 rounded overflow-auto max-h-64"
+        ref={logsRef}
+      >
+        <div className="font-bold text-white mb-2">🛠 Debug Console</div>
+        <ul className="space-y-1">
+          {debugLogs.map((line, i) => (
+            <li key={i}>{line}</li>
           ))}
         </ul>
       </div>
-
-      {/* Toggle Debug Console */}
-      <button
-        onClick={() => setConsoleOpen(!consoleOpen)}
-        className="fixed bottom-4 right-4 bg-black text-white px-3 py-2 rounded-full shadow-lg z-50"
-      >
-        {consoleOpen ? "Close Console" : "Open Console"}
-      </button>
-
-      {/* Debug Console */}
-      {consoleOpen && (
-        <div
-          className="fixed bottom-0 left-0 right-0 h-1/2 bg-black text-green-400 font-mono text-xs overflow-auto border-t border-gray-700 z-40"
-          ref={logsRef}
-        >
-          <div className="sticky top-0 bg-black text-white font-bold p-2 flex justify-between items-center">
-            <span>🛠 Debug Console</span>
-            <button
-              onClick={() => setDebugLogs([])}
-              className="text-xs bg-red-600 px-2 py-1 rounded"
-            >
-              Clear
-            </button>
-          </div>
-          <ul className="space-y-1 px-2">
-            {debugLogs.map((entry, i) => (
-              <li key={i}>{entry}</li>
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
   );
 };
