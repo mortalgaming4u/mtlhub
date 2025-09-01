@@ -1,12 +1,14 @@
-# app/schemas/ingest.py
-
-from pydantic import BaseModel
+from typing import Optional
+from pydantic import BaseModel, HttpUrl
 
 class IngestRequest(BaseModel):
-    url: str
+    url: HttpUrl
+    # Optional limit on number of chapters (None = unlimited/default)
+    limit: Optional[int] = None
+
 
 class IngestResponse(BaseModel):
     status: str
-    novel_id: int | None = None
-    chapters_ingested: int | None = None
-    message: str | None = None
+    novel_id: int
+    chapters_ingested: int
+    message: Optional[str] = None
