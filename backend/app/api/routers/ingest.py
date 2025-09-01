@@ -1,14 +1,11 @@
-# backend/app/api/routers/ingest.py
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 import os
 
 from app.db.session import get_db
-from app.services.novel_ingestor import NovelIngestor
+from app.services.novel_ingestor import get_ingestor   # ← swapped in
 from app.schemas.ingest import IngestRequest, IngestResponse
 
-# Now the router owns the "/ingest" prefix
 router = APIRouter(
     prefix="/ingest",
     tags=["ingest"],
@@ -31,9 +28,14 @@ def ingest_novel(
             detail="Missing Supabase service role key"
         )
 
-    ingestor = NovelIngestor(db=db, service_role_key=service_key)
-    result = ingestor.ingest_novel(url=request.url)
+    # Use domain-based factory instead of generic NovelIngestor
+    ingestor = get_ingestor(
+        db=db,
+        service_key=service_key,
+        url=request.url
+    )
 
+    result = ingestor.ingest_novel(url=request.url)
     if result.get("status") == "error":
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
