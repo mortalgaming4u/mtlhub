@@ -10,7 +10,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.routers.ingest import router as ingest_router
 
-app = FastAPI(title="MTLHub API")
+# Enable debug=True so you get full tracebacks in the JSON response
+app = FastAPI(
+    title="MTLHub API",
+    debug=True,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,5 +24,5 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Single, simple prefix. Routers define their own sub‐paths.
+# Single, simple prefix. Routers define their own sub-paths.
 app.include_router(ingest_router, prefix="/api")
