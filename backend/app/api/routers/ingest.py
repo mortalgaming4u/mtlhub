@@ -5,8 +5,7 @@ from pydantic import BaseModel, HttpUrl
 from app.services.novel_ingestor import NovelIngestor
 
 router = APIRouter(
-    prefix="/ingest",
-    tags=["ingest"],
+    tags=["ingest"],  # Removed prefix to avoid double /ingest
 )
 
 
@@ -26,12 +25,11 @@ async def ingest_novel(req: IngestRequest):
     """
     service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
     if not service_key:
-        raise HTTPException(500, detail="Supabase service role key not configured")
+        raise HTTPException(status_code=500, detail="Supabase service role key not configured")
 
     try:
         ingestor = NovelIngestor(service_role_key=service_key)
         result = ingestor.ingest(req.url)
         return IngestResponse(success=True, novel_id=result.novel_id)
     except Exception as e:
-        # Log full stack in your logger if desired
         raise HTTPException(status_code=500, detail=str(e))
