@@ -4,19 +4,19 @@ from pydantic import BaseModel, HttpUrl
 
 from app.services.novel_ingestor import NovelIngestor
 
+# ✅ No internal prefix here — it's already set in main.py
 router = APIRouter(
-    tags=["ingest"],  # Removed prefix to avoid double /ingest
+    tags=["ingest"],
 )
 
-
+# Request model
 class IngestRequest(BaseModel):
     url: HttpUrl
 
-
+# Response model
 class IngestResponse(BaseModel):
     success: bool
     novel_id: int
-
 
 @router.post("/", response_model=IngestResponse)
 async def ingest_novel(req: IngestRequest):
