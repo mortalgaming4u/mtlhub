@@ -1,24 +1,26 @@
 # backend/app/main.py
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-
-from .db import engine, Base
-from .api.routers.novels import router as novels_router
-from .api.routers.chapters import router as chapters_router
+from app.db.session import engine, Base
+from app.api.routers.novels import router as novels_router
+from app.api.routers.chapters import router as chapters_router
+import logging
 
 # Auto-create tables on startup
 Base.metadata.create_all(bind=engine)
 
+# Initialize FastAPI app
 app = FastAPI(title="MTLHub API")
 
+# Enable CORS for frontend integration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Consider restricting in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.include_router(novels_router)
-app.include_router(chapters_router)
+# Include routers with explicit prefixes
+app.include_router(novels_router, prefix="/api/nov
