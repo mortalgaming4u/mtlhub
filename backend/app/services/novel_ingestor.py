@@ -1,35 +1,27 @@
 import requests
 from bs4 import BeautifulSoup
 import logging
-
 from urllib.parse import urlparse
 from typing import Union
 from pydantic import HttpUrl
-
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 logger = logging.getLogger(__name__)
 
-
 def get_ingestor(db: Session, service_role_key: str, url: Union[str, HttpUrl]):
-    """
-    Return the correct ingestor based on the URL's domain.
+    """Return the correct ingestor based on the URL's domain.
     Dynamically imports domain-specific classes to avoid circular imports.
     """
     hostname = urlparse(str(url)).netloc.lower()  # ✅ FIXED: convert HttpUrl to str
-
     if hostname.endswith("ixdzs.tw"):
         from .ixdzs_ingestor import IxdzsIngestor
         return IxdzsIngestor(db, service_role_key)
-
     # add more domains here with similar dynamic imports...
     return NovelIngestor(db, service_role_key)
 
-
 class NovelIngestor:
-    """
-    Generic ingestor for unsupported domains.
+    """Generic ingestor for unsupported domains.
     Handles metadata extraction, chapter loops, DB writes, and error handling.
     """
 
@@ -71,13 +63,12 @@ class NovelIngestor:
         return "Chapter", text
 
     def ingest_novel(self, url: str, limit: int = 5) -> dict:
-        """
-        Main orchestration:
-         1) fetch_html listing page
-         2) extract_metadata
-         3) loop chapters (calls fetch_chapter_content)
-         4) write Novel + Chapter to DB
-         5) commit & return status dict
+        """Main orchestration:
+        1) fetch_html listing page
+        2) extract_metadata
+        3) loop chapters (calls fetch_chapter_content)
+        4) write Novel + Chapter to DB
+        5) commit & return status dict
         """
         from app.models.novel import Novel, Chapter
 
@@ -105,14 +96,6 @@ class NovelIngestor:
 
         ingested = 0
         # A real generic ingestor wouldn’t know chapter URLs – so skip or raise
-        self.db.commit()
-        return {"status": "success", "novel_id": novel.id, "chapters_ingested": ingested}            total_chapters=meta["total_chapters"],
-        )
-        self.db.add(novel)
-        self.db.flush()
 
-        ingested = 0
-        # A real generic ingestor wouldn’t know chapter URLs – so skip or raise
         self.db.commit()
         return {"status": "success", "novel_id": novel.id, "chapters_ingested": ingested}
-
