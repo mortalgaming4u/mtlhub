@@ -1,19 +1,14 @@
 # backend/app/models/novel.py
 
 from sqlalchemy import Column, Integer, String
-from sqlalchemy.orm import relationship
-from ..db import Base
+from app.db.session import Base
 
 class Novel(Base):
     __tablename__ = "novels"
 
     id = Column(Integer, primary_key=True, index=True)
-    title = Column(String, unique=True, nullable=False, index=True)
-    author = Column(String, nullable=True)
-
-    chapters = relationship(
-        "Chapter",
-        back_populates="novel",
-        cascade="all, delete-orphan",
-        order_by="Chapter.index"
-    )
+    title = Column(String(255), nullable=False)
+    author = Column(String(100), nullable=True)
+    cover_url = Column(String(500), nullable=True)
+    source_url = Column(String(500), unique=True, nullable=False)
+    total_chapters = Column(Integer, default=0)
