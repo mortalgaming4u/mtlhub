@@ -1,73 +1,60 @@
-import logging
-from typing import List, Dict
+# backend/app/services/ixdzs_ingestor.py
 
+import logging
+import re
+import time
 import requests
 from bs4 import BeautifulSoup
+from typing import Tuple
 
-from .base import NovelIngestor, IngestResult
+from .novel_ingestor import NovelIngestor
 
 logger = logging.getLogger(__name__)
 
 class IxdzsIngestor(NovelIngestor):
     """
     Ingestor for ixdzs.tw novels.
-    Endpoint pattern: https://ixdzs.tw/read/{novel_id}/
+    Inherits the generic ingest_novel() flow from NovelIngestor.
     """
 
     SUPPORTED_DOMAIN = "ixdzs.tw"
 
-    def fetch_html(self, url: str) -> BeautifulSoup:
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/115.0.0.0 Safari/537.36"
-            ),
-            "Referer": "https://ixdzs.tw/",
-            "Accept-Language": "zh-CN,zh;q=0.9",
-        }
-        resp = requests.get(url, headers=headers, timeout=15)
-        resp.raise_for_status()
-        resp.encoding = resp.apparent_encoding or "utf-8"
-        return BeautifulSoup(resp.text, "html5lib")
+    def __init__(self, db, service_role_key: str):
+        super().__init__(db, service_role_key)
 
-    def parse_metadata(self, soup: BeautifulSoup) -> Dict:
-        # Adjust selectors if the real page structure differs
+    def extract_metadata(self, soup: BeautifulSoup, url: str) -> dict:
+        # Title & author
         title = soup.select_one("div.book-info h1").get_text(strip=True)
         author = soup.select_one("div.book-info .author a").get_text(strip=True)
-        status = soup.select_one("div.book-info .status").get_text(strip=True)
-        chapter_count = int(
-            soup.select_one("div.book-stats .chapters").get_text(strip=True)
-        )
+
+        # Total chapters (strip out non-digits)
+        count_text = soup.select_one("div.book-stats .chapters").get_text(strip=True)
+        total_chapters = int(re.sub(r"\D+", "", count_text) or 0)
+
         return {
-            "title": title,
-            "author": author,
-            "status": status,
-            "chapter_count": chapter_count,
+            "title": title[:255],
+            "author": author[:100],
+            "cover_url": None,               # no reliable selector
+            "total_chapters": total_chapters,
+            "source_url": url[:500],
         }
 
-    def get_chapter_list(self, soup: BeautifulSoup) -> List[Dict]:
-        chapters = []
-        # Each chapter link typically under a <ul class="chapter-list">
-        for link in soup.select("ul.chapter-list li > a"):
-            href = link["href"]
-            # Normalize to absolute URL
-            url = href if href.startswith("http") else f"https://ixdzs.tw{href}"
-            # Extract chapter number from URL tail
-            num_str = url.rstrip("/").split("/")[-1]
-            chapters.append({"number": int(num_str), "url": url})
-        return chapters
-
-    def fetch_chapter(self, url: str) -> str:
+    def fetch_chapter_content(self, url: str) -> Tuple[str, str]:
         soup = self.fetch_html(url)
-        # The actual text container may differ; adjust as needed
-        content_div = soup.select_one("div.read-content")
-        paras = content_div.find_all("p")
-        return "\n".join(p.get_text(strip=True) for p in paras)
 
-    def ingest(self, url: str) -> IngestResult:
-        """
-        Override ingest to tie it all together.
-        BaseIngestor.ingest may already handle this, so call super().
-        """
-        return super().ingest(url)
+        # Chapter title
+        title_el = soup.select_one("div.chapter-title h1")
+        chapter_title = title_el.get_text(strip=True) if title_el else "Chapter"
+
+        # Chapter body
+        content_div = soup.select_one("div.read-content")
+        paragraphs = content_div.find_all("p") if content_div else []
+        body = "\n".join(p.get_text(strip=True) for p in paragraphs)
+
+        return chapter_title[:255], body
+
+    # No need to override ingest_novel(); inherited version will:
+    # 1) fetch_html the listing page
+    # 2) call extract_metadata()
+    # 3) loop chapters 1..total_chapters, building URLs with `.fetch_chapter_content()`
+    # 4) write Novel + Chapter rows and commit
