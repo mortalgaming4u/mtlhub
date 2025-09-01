@@ -3,17 +3,21 @@ from bs4 import BeautifulSoup
 import logging
 
 from urllib.parse import urlparse
+from typing import Union
+from pydantic import HttpUrl
+
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 logger = logging.getLogger(__name__)
 
-def get_ingestor(db: Session, service_role_key: str, url: str):
+
+def get_ingestor(db: Session, service_role_key: str, url: Union[str, HttpUrl]):
     """
     Return the correct ingestor based on the URL's domain.
     Dynamically imports domain-specific classes to avoid circular imports.
     """
-    hostname = urlparse(url).netloc.lower()
+    hostname = urlparse(str(url)).netloc.lower()  # ✅ FIXED: convert HttpUrl to str
 
     if hostname.endswith("ixdzs.tw"):
         from .ixdzs_ingestor import IxdzsIngestor
@@ -102,4 +106,13 @@ class NovelIngestor:
         ingested = 0
         # A real generic ingestor wouldn’t know chapter URLs – so skip or raise
         self.db.commit()
+        return {"status": "success", "novel_id": novel.id, "chapters_ingested": ingested}            total_chapters=meta["total_chapters"],
+        )
+        self.db.add(novel)
+        self.db.flush()
+
+        ingested = 0
+        # A real generic ingestor wouldn’t know chapter URLs – so skip or raise
+        self.db.commit()
         return {"status": "success", "novel_id": novel.id, "chapters_ingested": ingested}
+
