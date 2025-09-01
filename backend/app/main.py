@@ -1,39 +1,31 @@
-# app/api/routers/ingest.py
+# backend/app/main.py
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-import os
+"""
+ASGI entrypoint for MTLHub backend.
 
-from app.db.session import get_db
-from app.services.novel_ingestor import NovelIngestor
-from app.schemas.ingest import IngestRequest, IngestResponse
+Routers:
+- /api/ingest → Novel ingestion via URL (see app/api/routers/ingest.py)
 
-router = APIRouter()
+To run locally:
+$ cd backend
+$ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+"""
 
-@router.post("/", response_model=IngestResponse, summary="Ingest a novel by URL")
-def ingest_novel(
-    request: IngestRequest,
-    db: Session = Depends(get_db),
-):
-    """
-    Ingests a novel from the provided URL and stores metadata + chapters.
-    Returns IngestResponse with status, novel_id, chapters_ingested, and optional message.
-    """
-    service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-    if not service_key:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Missing Supabase service role key"
-        )
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-    ingestor = NovelIngestor(db=db, service_role_key=service_key)
+from app.api.routers.ingest import router as ingest_router
 
-    result = ingestor.ingest_novel(url=request.url)
-    if result.get("status") == "error":
-        # bubble up ingestion errors as HTTP 500
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=result.get("message", "Unknown ingestion error")
-        )
+app = FastAPI(title="MTLHub API")
 
-    return IngestResponse(**result)
+# CORS – restrict origins in production
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Register your routers here
+app.include_router(ingest_router, prefix="/api/ingest", tags=["ingest"])
