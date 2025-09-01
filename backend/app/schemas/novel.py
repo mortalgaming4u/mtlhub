@@ -17,3 +17,4 @@ class NovelRead(NovelBase):
 
     class Config:
         orm_mode = True
+
