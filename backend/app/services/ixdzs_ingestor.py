@@ -1,13 +1,17 @@
+# backend/app/services/ixdzs_ingestor.py
+
 import logging
 import re
 import time
+from typing import List, Tuple, Union
+
 import requests
 from bs4 import BeautifulSoup
-from typing import List, Tuple
+from pydantic import HttpUrl
+from sqlalchemy.exc import IntegrityError
 
 from .novel_ingestor import NovelIngestor
 from app.models.novel import Novel, Chapter
-from sqlalchemy.exc import IntegrityError
 
 logger = logging.getLogger(__name__)
 
@@ -22,17 +26,21 @@ class IxdzsIngestor(NovelIngestor):
     def __init__(self, db, service_role_key: str):
         super().__init__(db, service_role_key)
 
-    def extract_metadata(self, soup: BeautifulSoup, url: str) -> dict:
+    def extract_metadata(self, soup: BeautifulSoup, url: Union[str, HttpUrl]) -> dict:
+        # Always work with a plain string
+        url_str = str(url)
+
+        # Defensive selectors with logging
         title_el = soup.select_one("div.book-info h1")
         author_el = soup.select_one("div.book-info .author a")
         count_el = soup.select_one("div.book-stats .chapters")
 
         if not title_el:
-            logger.warning(f"[ixdzs] Missing title element at {url}")
+            logger.warning(f"[ixdzs] Missing title element at {url_str}")
         if not author_el:
-            logger.warning(f"[ixdzs] Missing author element at {url}")
+            logger.warning(f"[ixdzs] Missing author element at {url_str}")
         if not count_el:
-            logger.warning(f"[ixdzs] Missing chapter count element at {url}")
+            logger.warning(f"[ixdzs] Missing chapter count element at {url_str}")
 
         title = title_el.get_text(strip=True) if title_el else "Unknown"
         author = author_el.get_text(strip=True) if author_el else "Unknown"
@@ -44,7 +52,7 @@ class IxdzsIngestor(NovelIngestor):
             "author": author[:100],
             "cover_url": None,
             "total_chapters": total_chapters,
-            "source_url": url[:500],
+            "source_url": url_str[:500],
         }
 
     def get_chapter_urls(self, soup: BeautifulSoup, base_url: str) -> List[str]:
@@ -62,6 +70,7 @@ class IxdzsIngestor(NovelIngestor):
 
     def fetch_chapter_content(self, url: str) -> Tuple[str, str]:
         soup = self.fetch_html(url)
+
         title_el = soup.select_one("div.chapter-title h1")
         if not title_el:
             logger.warning(f"[ixdzs] Missing chapter title at {url}")
@@ -75,14 +84,20 @@ class IxdzsIngestor(NovelIngestor):
 
         return chapter_title[:255], body
 
-    def ingest_novel(self, url: str, limit: int = None) -> dict:
+    def ingest_novel(self, url: Union[str, HttpUrl], limit: int = None) -> dict:
         """
         Full ingestion: metadata + chapter loop + DB writes + commit.
         """
-        logger.info(f"Begin ixdzs ingestion: {url}")
-        soup = self.fetch_html(url)
-        meta = self.extract_metadata(soup, url)
+        url_str = str(url)
+        logger.info(f"Begin ixdzs ingestion: {url_str}")
 
+        # 1) Fetch listing page
+        soup = self.fetch_html(url_str)
+
+        # 2) Extract metadata
+        meta = self.extract_metadata(soup, url_str)
+
+        # 3) Check for existing novel
         existing = (
             self.db.query(Novel)
             .filter(Novel.source_url == meta["source_url"])
@@ -91,14 +106,17 @@ class IxdzsIngestor(NovelIngestor):
         if existing:
             return {"status": "exists", "novel_id": existing.id}
 
+        # 4) Create novel record
         novel = Novel(**meta)
         self.db.add(novel)
         self.db.flush()
 
-        chapter_urls = self.get_chapter_urls(soup, url)
+        # 5) Gather chapter URLs
+        chapter_urls = self.get_chapter_urls(soup, url_str)
         if limit:
             chapter_urls = chapter_urls[:limit]
 
+        # 6) Loop and save each chapter
         ingested = 0
         for chap_url in chapter_urls:
             try:
@@ -114,10 +132,11 @@ class IxdzsIngestor(NovelIngestor):
                 time.sleep(0.2)  # pacing
             except IntegrityError:
                 self.db.rollback()
-                logger.warning(f"Duplicate chapter skipped: {chap_url}")
+                logger.warning(f"[ixdzs] Duplicate chapter skipped: {chap_url}")
             except Exception as e:
-                logger.error(f"Failed to fetch {chap_url}: {e}")
+                logger.error(f"[ixdzs] Failed to fetch {chap_url}: {e}")
 
+        # 7) Finalize
         self.db.commit()
         return {
             "status": "success",
