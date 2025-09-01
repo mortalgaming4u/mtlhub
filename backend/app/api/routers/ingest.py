@@ -1,31 +1,35 @@
+# app/api/routers/ingest.py
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+import os
+
 from app.db.session import get_db
 from app.services.novel_ingestor import NovelIngestor
 from app.schemas.ingest import IngestRequest, IngestResponse
-import os
 
 router = APIRouter()
 
 @router.post("/ingest", response_model=IngestResponse)
-def ingest_novel(request: IngestRequest, db: Session = Depends(get_db)):
+def ingest_novel(
+    req: IngestRequest,
+    db: Session = Depends(get_db),
+):
     """
-    Ingests a novel from the provided URL and stores metadata + chapters.
+    Ingest a novel from URL and store metadata + chapters.
     """
-    service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-    if not service_key:
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    if not key:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Missing Supabase service role key"
+            detail="Missing Supabase service role key",
         )
 
-    ingestor = NovelIngestor(db=db, service_role_key=service_key)
-
-    try:
-        result = ingestor.ingest_novel(url=request.url)
-        return IngestResponse(**result)
-    except Exception as e:
+    ingestor = NovelIngestor(db=db, service_role_key=key)
+    res = ingestor.ingest_novel(url=req.url)
+    if res.get("status") == "error":
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail=res.get("message", "Unknown error"),
         )
+    return IngestResponse(**res)
