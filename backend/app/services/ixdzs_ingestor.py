@@ -23,9 +23,20 @@ class IxdzsIngestor(NovelIngestor):
         super().__init__(db, service_role_key)
 
     def extract_metadata(self, soup: BeautifulSoup, url: str) -> dict:
-        title = soup.select_one("div.book-info h1").get_text(strip=True)
-        author = soup.select_one("div.book-info .author a").get_text(strip=True)
-        count_text = soup.select_one("div.book-stats .chapters").get_text(strip=True)
+        title_el = soup.select_one("div.book-info h1")
+        author_el = soup.select_one("div.book-info .author a")
+        count_el = soup.select_one("div.book-stats .chapters")
+
+        if not title_el:
+            logger.warning(f"[ixdzs] Missing title element at {url}")
+        if not author_el:
+            logger.warning(f"[ixdzs] Missing author element at {url}")
+        if not count_el:
+            logger.warning(f"[ixdzs] Missing chapter count element at {url}")
+
+        title = title_el.get_text(strip=True) if title_el else "Unknown"
+        author = author_el.get_text(strip=True) if author_el else "Unknown"
+        count_text = count_el.get_text(strip=True) if count_el else ""
         total_chapters = int(re.sub(r"\D+", "", count_text) or 0)
 
         return {
@@ -52,9 +63,13 @@ class IxdzsIngestor(NovelIngestor):
     def fetch_chapter_content(self, url: str) -> Tuple[str, str]:
         soup = self.fetch_html(url)
         title_el = soup.select_one("div.chapter-title h1")
+        if not title_el:
+            logger.warning(f"[ixdzs] Missing chapter title at {url}")
         chapter_title = title_el.get_text(strip=True) if title_el else "Chapter"
 
         content_div = soup.select_one("div.read-content")
+        if not content_div:
+            logger.warning(f"[ixdzs] Missing chapter content at {url}")
         paras = content_div.find_all("p") if content_div else []
         body = "\n".join(p.get_text(strip=True) for p in paras)
 
