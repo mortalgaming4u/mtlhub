@@ -1,20 +1,20 @@
-# backend/app/services/ixdzs_ingestor.py
-
 import logging
 import re
 import time
 import requests
 from bs4 import BeautifulSoup
-from typing import Tuple
+from typing import List, Tuple
 
 from .novel_ingestor import NovelIngestor
+from app.models.novel import Novel, Chapter
+from sqlalchemy.exc import IntegrityError
 
 logger = logging.getLogger(__name__)
 
 class IxdzsIngestor(NovelIngestor):
     """
     Ingestor for ixdzs.tw novels.
-    Inherits the generic ingest_novel() flow from NovelIngestor.
+    Overrides metadata, chapter-list extraction, and supplies a full ingest_novel.
     """
 
     SUPPORTED_DOMAIN = "ixdzs.tw"
@@ -23,38 +23,89 @@ class IxdzsIngestor(NovelIngestor):
         super().__init__(db, service_role_key)
 
     def extract_metadata(self, soup: BeautifulSoup, url: str) -> dict:
-        # Title & author
         title = soup.select_one("div.book-info h1").get_text(strip=True)
         author = soup.select_one("div.book-info .author a").get_text(strip=True)
-
-        # Total chapters (strip out non-digits)
         count_text = soup.select_one("div.book-stats .chapters").get_text(strip=True)
         total_chapters = int(re.sub(r"\D+", "", count_text) or 0)
 
         return {
             "title": title[:255],
             "author": author[:100],
-            "cover_url": None,               # no reliable selector
+            "cover_url": None,
             "total_chapters": total_chapters,
             "source_url": url[:500],
         }
 
+    def get_chapter_urls(self, soup: BeautifulSoup, base_url: str) -> List[str]:
+        """Extract all chapter links in reading order."""
+        links = soup.select("ul.chapter-list li a")
+        urls = []
+        for a in links:
+            href = a.get("href")
+            if not href:
+                continue
+            if href.startswith("/"):
+                href = f"https://{self.SUPPORTED_DOMAIN}{href}"
+            urls.append(href)
+        return urls
+
     def fetch_chapter_content(self, url: str) -> Tuple[str, str]:
         soup = self.fetch_html(url)
-
-        # Chapter title
         title_el = soup.select_one("div.chapter-title h1")
         chapter_title = title_el.get_text(strip=True) if title_el else "Chapter"
 
-        # Chapter body
         content_div = soup.select_one("div.read-content")
-        paragraphs = content_div.find_all("p") if content_div else []
-        body = "\n".join(p.get_text(strip=True) for p in paragraphs)
+        paras = content_div.find_all("p") if content_div else []
+        body = "\n".join(p.get_text(strip=True) for p in paras)
 
         return chapter_title[:255], body
 
-    # No need to override ingest_novel(); inherited version will:
-    # 1) fetch_html the listing page
-    # 2) call extract_metadata()
-    # 3) loop chapters 1..total_chapters, building URLs with `.fetch_chapter_content()`
-    # 4) write Novel + Chapter rows and commit
+    def ingest_novel(self, url: str, limit: int = None) -> dict:
+        """
+        Full ingestion: metadata + chapter loop + DB writes + commit.
+        """
+        logger.info(f"Begin ixdzs ingestion: {url}")
+        soup = self.fetch_html(url)
+        meta = self.extract_metadata(soup, url)
+
+        existing = (
+            self.db.query(Novel)
+            .filter(Novel.source_url == meta["source_url"])
+            .first()
+        )
+        if existing:
+            return {"status": "exists", "novel_id": existing.id}
+
+        novel = Novel(**meta)
+        self.db.add(novel)
+        self.db.flush()
+
+        chapter_urls = self.get_chapter_urls(soup, url)
+        if limit:
+            chapter_urls = chapter_urls[:limit]
+
+        ingested = 0
+        for chap_url in chapter_urls:
+            try:
+                chap_title, chap_body = self.fetch_chapter_content(chap_url)
+                chapter = Chapter(
+                    novel_id=novel.id,
+                    title=chap_title,
+                    content=chap_body,
+                    source_url=chap_url[:500],
+                )
+                self.db.add(chapter)
+                ingested += 1
+                time.sleep(0.2)  # pacing
+            except IntegrityError:
+                self.db.rollback()
+                logger.warning(f"Duplicate chapter skipped: {chap_url}")
+            except Exception as e:
+                logger.error(f"Failed to fetch {chap_url}: {e}")
+
+        self.db.commit()
+        return {
+            "status": "success",
+            "novel_id": novel.id,
+            "chapters_ingested": ingested,
+        }
